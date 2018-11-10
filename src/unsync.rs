@@ -1,4 +1,5 @@
 use std::cell::{Cell, UnsafeCell};
+use std::ops::{Deref, DerefMut};
 
 pub struct Mutex<T: ?Sized> {
     locked: Cell<bool>,
@@ -24,5 +25,22 @@ impl<T: ?Sized> Mutex<T> {
     pub fn get_mut(&mut self) -> &mut T {
         let inner = unsafe { &mut *self.data.get() };
         inner
+    }
+}
+
+pub struct MutexGuard<'a, T: ?Sized + 'a> {
+    mutex: &'a Mutex<T>,
+}
+
+impl<'a, T: ?Sized + 'a> Deref for MutexGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.mutex.data.get() }
+    }
+}
+
+impl<'a, T: ?Sized + 'a> DerefMut for MutexGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.mutex.data.get() }
     }
 }
