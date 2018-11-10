@@ -22,6 +22,15 @@ impl<T> Mutex<T> {
 }
 
 impl<T: ?Sized> Mutex<T> {
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        if self.locked.get() {
+            return None;
+        }
+
+        let guard = MutexGuard::new(self);
+        Some(guard)
+    }
+
     pub fn get_mut(&mut self) -> &mut T {
         let inner = unsafe { &mut *self.data.get() };
         inner
@@ -30,6 +39,13 @@ impl<T: ?Sized> Mutex<T> {
 
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
     mutex: &'a Mutex<T>,
+}
+
+impl<'a, T: ?Sized + 'a> MutexGuard<'a, T> {
+    fn new(mutex: &'a Mutex<T>) -> Self {
+        mutex.locked.set(true);
+        Self { mutex }
+    }
 }
 
 impl<'a, T: ?Sized + 'a> Deref for MutexGuard<'a, T> {
@@ -42,5 +58,11 @@ impl<'a, T: ?Sized + 'a> Deref for MutexGuard<'a, T> {
 impl<'a, T: ?Sized + 'a> DerefMut for MutexGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.mutex.data.get() }
+    }
+}
+
+impl<'a, T: ?Sized + 'a> Drop for MutexGuard<'a, T> {
+    fn drop(&mut self) {
+        self.mutex.locked.set(false);
     }
 }
