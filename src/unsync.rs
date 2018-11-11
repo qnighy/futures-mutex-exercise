@@ -1,12 +1,14 @@
 use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::thread;
 
 use futures::prelude::*;
 use futures::task::{LocalWaker, Poll};
 
 pub struct Mutex<T: ?Sized> {
     locked: Cell<bool>,
+    poisoned: Cell<bool>,
     waiters: Cell<Vec<LocalWaker>>,
     data: UnsafeCell<T>,
 }
@@ -15,6 +17,7 @@ impl<T> Mutex<T> {
     pub fn new(inner: T) -> Self {
         Self {
             locked: Cell::new(false),
+            poisoned: Cell::new(false),
             waiters: Cell::new(Vec::new()),
             data: UnsafeCell::new(inner),
         }
@@ -52,6 +55,10 @@ impl<T: ?Sized> Mutex<T> {
         Some(guard)
     }
 
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned.get()
+    }
+
     pub fn get_mut(&mut self) -> &mut T {
         let inner = unsafe { &mut *self.data.get() };
         inner
@@ -60,12 +67,16 @@ impl<T: ?Sized> Mutex<T> {
 
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
     mutex: &'a Mutex<T>,
+    is_panicking: bool,
 }
 
 impl<'a, T: ?Sized + 'a> MutexGuard<'a, T> {
     fn new(mutex: &'a Mutex<T>) -> Self {
         mutex.locked.set(true);
-        Self { mutex }
+        Self {
+            mutex,
+            is_panicking: thread::panicking(),
+        }
     }
 }
 
@@ -85,6 +96,10 @@ impl<'a, T: ?Sized + 'a> DerefMut for MutexGuard<'a, T> {
 impl<'a, T: ?Sized + 'a> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
         self.mutex.locked.set(false);
+        if !self.is_panicking && thread::panicking() {
+            self.mutex.poisoned.set(true);
+        }
+
         let mut waiters = self.mutex.waiters.replace(Vec::new());
         for waiter in waiters.drain(..) {
             waiter.wake();
