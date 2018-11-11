@@ -6,3 +6,9 @@ edition = "2018"
 
 [dependencies]
 futures-preview = "0.3.0-alpha.9"
+
+[dev-dependencies]
+futures-preview = { version = "0.3.0-alpha.9", features = ["tokio-compat"] }
+futures-test-preview = "0.3.0-alpha.9"
+tokio = "0.1.11"
+rand = "0.5.5"
