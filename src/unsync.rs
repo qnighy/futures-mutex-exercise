@@ -1,7 +1,7 @@
 use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
 
-use futures::task::LocalWaker;
+use futures::task::{LocalWaker, Poll};
 
 pub struct Mutex<T: ?Sized> {
     locked: Cell<bool>,
@@ -26,6 +26,18 @@ impl<T> Mutex<T> {
 }
 
 impl<T: ?Sized> Mutex<T> {
+    pub fn poll_lock(&self, lw: &LocalWaker) -> Poll<MutexGuard<'_, T>> {
+        if self.locked.get() {
+            let mut waiters = self.waiters.replace(Vec::new());
+            waiters.push(lw.clone());
+            self.waiters.replace(waiters);
+            return Poll::Pending;
+        }
+
+        let guard = MutexGuard::new(self);
+        Poll::Ready(guard)
+    }
+
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         if self.locked.get() {
             return None;
