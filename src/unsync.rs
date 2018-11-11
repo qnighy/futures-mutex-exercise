@@ -1,5 +1,6 @@
 use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::sync::{LockResult, PoisonError, TryLockError, TryLockResult};
 use std::thread;
@@ -13,6 +14,9 @@ pub struct Mutex<T: ?Sized> {
     waiters: Cell<Vec<LocalWaker>>,
     data: UnsafeCell<T>,
 }
+
+impl<T: ?Sized> UnwindSafe for Mutex<T> {}
+impl<T: ?Sized> RefUnwindSafe for Mutex<T> {}
 
 impl<T> Mutex<T> {
     pub fn new(inner: T) -> Self {
