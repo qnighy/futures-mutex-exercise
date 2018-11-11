@@ -1,6 +1,8 @@
 use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 
+use futures::prelude::*;
 use futures::task::{LocalWaker, Poll};
 
 pub struct Mutex<T: ?Sized> {
@@ -26,6 +28,9 @@ impl<T> Mutex<T> {
 }
 
 impl<T: ?Sized> Mutex<T> {
+    pub fn lock(&self) -> MutexAcquire<'_, T> {
+        MutexAcquire { mutex: self }
+    }
     pub fn poll_lock(&self, lw: &LocalWaker) -> Poll<MutexGuard<'_, T>> {
         if self.locked.get() {
             let mut waiters = self.waiters.replace(Vec::new());
@@ -85,5 +90,16 @@ impl<'a, T: ?Sized + 'a> Drop for MutexGuard<'a, T> {
             waiter.wake();
         }
         self.mutex.waiters.replace(waiters);
+    }
+}
+
+pub struct MutexAcquire<'a, T: ?Sized + 'a> {
+    mutex: &'a Mutex<T>,
+}
+
+impl<'a, T: ?Sized + 'a> Future for MutexAcquire<'a, T> {
+    type Output = MutexGuard<'a, T>;
+    fn poll(self: Pin<&mut Self>, lw: &LocalWaker) -> Poll<Self::Output> {
+        self.mutex.poll_lock(lw)
     }
 }
