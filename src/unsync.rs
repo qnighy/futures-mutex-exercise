@@ -1,6 +1,7 @@
 use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::{LockResult, PoisonError, TryLockError, TryLockResult};
 use std::thread;
 
 use futures::prelude::*;
@@ -23,10 +24,15 @@ impl<T> Mutex<T> {
         }
     }
 
-    pub fn into_inner(self) -> T {
-        let Self { data, .. } = self;
+    pub fn into_inner(self) -> LockResult<T> {
+        let Self { poisoned, data, .. } = self;
+        let poisoned = poisoned.into_inner();
         let inner = data.into_inner();
-        inner
+        if poisoned {
+            Err(PoisonError::new(inner))
+        } else {
+            Ok(inner)
+        }
     }
 }
 
@@ -34,7 +40,7 @@ impl<T: ?Sized> Mutex<T> {
     pub fn lock(&self) -> MutexAcquire<'_, T> {
         MutexAcquire { mutex: self }
     }
-    pub fn poll_lock(&self, lw: &LocalWaker) -> Poll<MutexGuard<'_, T>> {
+    pub fn poll_lock(&self, lw: &LocalWaker) -> Poll<LockResult<MutexGuard<'_, T>>> {
         if self.locked.get() {
             let mut waiters = self.waiters.replace(Vec::new());
             waiters.push(lw.clone());
@@ -43,25 +49,37 @@ impl<T: ?Sized> Mutex<T> {
         }
 
         let guard = MutexGuard::new(self);
-        Poll::Ready(guard)
+        if self.poisoned.get() {
+            Poll::Ready(Err(PoisonError::new(guard)))
+        } else {
+            Poll::Ready(Ok(guard))
+        }
     }
 
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+    pub fn try_lock(&self) -> TryLockResult<MutexGuard<'_, T>> {
         if self.locked.get() {
-            return None;
+            return Err(TryLockError::WouldBlock);
         }
 
         let guard = MutexGuard::new(self);
-        Some(guard)
+        if self.poisoned.get() {
+            Err(PoisonError::new(guard).into())
+        } else {
+            Ok(guard)
+        }
     }
 
     pub fn is_poisoned(&self) -> bool {
         self.poisoned.get()
     }
 
-    pub fn get_mut(&mut self) -> &mut T {
+    pub fn get_mut(&mut self) -> LockResult<&mut T> {
         let inner = unsafe { &mut *self.data.get() };
-        inner
+        if self.poisoned.get() {
+            Err(PoisonError::new(inner))
+        } else {
+            Ok(inner)
+        }
     }
 }
 
@@ -113,7 +131,7 @@ pub struct MutexAcquire<'a, T: ?Sized + 'a> {
 }
 
 impl<'a, T: ?Sized + 'a> Future for MutexAcquire<'a, T> {
-    type Output = MutexGuard<'a, T>;
+    type Output = LockResult<MutexGuard<'a, T>>;
     fn poll(self: Pin<&mut Self>, lw: &LocalWaker) -> Poll<Self::Output> {
         self.mutex.poll_lock(lw)
     }
