@@ -1,4 +1,5 @@
 use std::cell::{Cell, UnsafeCell};
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -99,6 +100,31 @@ impl<T: Default> Default for Mutex<T> {
     }
 }
 
+impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let guard = match self.try_lock() {
+            Ok(guard) => Ok(guard),
+            Err(TryLockError::Poisoned(err)) => Ok(err.into_inner()),
+            Err(TryLockError::WouldBlock) => Err(()),
+        };
+        if let Ok(guard) = guard {
+            f.debug_struct("Mutex")
+                .field("data", &(&guard as &T))
+                .finish()
+        } else {
+            struct LockedPlaceholder;
+            impl fmt::Debug for LockedPlaceholder {
+                fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                    f.write_str("<locked>")
+                }
+            }
+            f.debug_struct("Mutex")
+                .field("data", &LockedPlaceholder)
+                .finish()
+        }
+    }
+}
+
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
     mutex: &'a Mutex<T>,
     is_panicking: bool,
@@ -142,6 +168,21 @@ impl<'a, T: ?Sized + 'a> Drop for MutexGuard<'a, T> {
     }
 }
 
+impl<'a, T: ?Sized + fmt::Debug + 'a> fmt::Debug for MutexGuard<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("MutexGuard")
+            .field("data", &(self as &T))
+            .finish()
+    }
+}
+
+impl<'a, T: ?Sized + fmt::Display + 'a> fmt::Display for MutexGuard<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <T as fmt::Display>::fmt(self, f)
+    }
+}
+
+#[derive(Debug)]
 pub struct MutexAcquire<'a, T: ?Sized + 'a> {
     mutex: &'a Mutex<T>,
 }
