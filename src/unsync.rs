@@ -87,6 +87,18 @@ impl<T: ?Sized> Mutex<T> {
     }
 }
 
+impl<T> From<T> for Mutex<T> {
+    fn from(x: T) -> Self {
+        Mutex::new(x)
+    }
+}
+
+impl<T: Default> Default for Mutex<T> {
+    fn default() -> Self {
+        Mutex::new(T::default())
+    }
+}
+
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
     mutex: &'a Mutex<T>,
     is_panicking: bool,
