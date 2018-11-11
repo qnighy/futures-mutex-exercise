@@ -1,8 +1,11 @@
 use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
 
+use futures::task::LocalWaker;
+
 pub struct Mutex<T: ?Sized> {
     locked: Cell<bool>,
+    waiters: Cell<Vec<LocalWaker>>,
     data: UnsafeCell<T>,
 }
 
@@ -10,6 +13,7 @@ impl<T> Mutex<T> {
     pub fn new(inner: T) -> Self {
         Self {
             locked: Cell::new(false),
+            waiters: Cell::new(Vec::new()),
             data: UnsafeCell::new(inner),
         }
     }
@@ -64,5 +68,10 @@ impl<'a, T: ?Sized + 'a> DerefMut for MutexGuard<'a, T> {
 impl<'a, T: ?Sized + 'a> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
         self.mutex.locked.set(false);
+        let mut waiters = self.mutex.waiters.replace(Vec::new());
+        for waiter in waiters.drain(..) {
+            waiter.wake();
+        }
+        self.mutex.waiters.replace(waiters);
     }
 }
